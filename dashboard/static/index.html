@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Satellite Collision Monitor</title>
+
+    <!-- CesiumJS -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a1a; color: #e0e0e0; font-family: 'Courier New', monospace; overflow: hidden; }
+
+        #cesiumContainer { width: 100%; height: 100vh; }
+
+        /* HUD */
+        #hud {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #hud h1 {
+            font-size: 18px;
+            color: #00ff88;
+            margin-bottom: 8px;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+        }
+        .stat-row { font-size: 13px; color: #88aacc; margin-bottom: 4px; }
+        .stat-value { color: #ffffff; font-weight: bold; }
+
+        /* Search */
+        #searchContainer {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 200;
+            width: 360px;
+        }
+        #searchInput {
+            width: 100%;
+            padding: 10px 16px;
+            background: rgba(10, 10, 26, 0.92);
+            border: 1px solid #1a3a5a;
+            border-radius: 8px;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        #searchInput:focus { border-color: #00ff88; }
+        #searchInput::placeholder { color: #556677; }
+        #searchResults {
+            margin-top: 4px;
+            background: rgba(10, 10, 26, 0.95);
+            border: 1px solid #1a3a5a;
+            border-radius: 8px;
+            max-height: 240px;
+            overflow-y: auto;
+            display: none;
+        }
+        .search-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+        .search-item:hover { background: rgba(0, 255, 136, 0.1); }
+        .search-item .sat-name { color: #44ddff; }
+        .search-item .sat-id { color: #556677; margin-left: 8px; }
+
+        /* Info panel */
+        #infoPanel {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            background: rgba(10, 10, 26, 0.92);
+            border: 1px solid #1a3a5a;
+            border-radius: 8px;
+            padding: 16px 24px;
+            display: none;
+            min-width: 320px;
+        }
+        #infoPanel .info-name { font-size: 16px; color: #00ff88; font-weight: bold; margin-bottom: 8px; }
+        #infoPanel .info-row { font-size: 13px; color: #88aacc; margin-bottom: 3px; }
+        #infoPanel .info-row span { color: #ffffff; }
+        #infoClose {
+            position: absolute; top: 8px; right: 12px;
+            color: #556677; cursor: pointer; font-size: 16px;
+            background: none; border: none; font-family: 'Courier New', monospace;
+        }
+        #infoClose:hover { color: #ff4444; }
+
+        /* Right panel — tabs */
+        #rightPanel {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 400px;
+            max-height: 80vh;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .panel-section {
+            background: rgba(10, 10, 26, 0.9);
+            border: 1px solid #1a3a5a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .panel-header h2 {
+            font-size: 13px;
+            margin: 0;
+        }
+
+        .panel-header .badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+
+        .panel-header .toggle {
+            font-size: 12px;
+            color: #556677;
+            transition: transform 0.2s;
+        }
+
+        .panel-header .toggle.collapsed { transform: rotate(-90deg); }
+
+        .panel-body {
+            overflow-y: auto;
+            max-height: 35vh;
+            padding: 8px;
+            transition: max-height 0.3s ease;
+        }
+
+        .panel-body.collapsed {
+            max-height: 0;
+            padding: 0 8px;
+            overflow: hidden;
+        }
+
+        /* Alert section */
+        .alert-header { background: rgba(255, 68, 68, 0.15); border-bottom: 1px solid #1a3a5a; }
+        .alert-header h2 { color: #ff4444; }
+        .alert-badge { background: rgba(255, 68, 68, 0.3); color: #ff4444; }
+
+        /* Encounter section */
+        .encounter-header { background: rgba(255, 170, 0, 0.1); border-bottom: 1px solid #1a3a5a; }
+        .encounter-header h2 { color: #ffaa00; }
+        .encounter-badge { background: rgba(255, 170, 0, 0.25); color: #ffaa00; }
+
+        .alert-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid #1a2a3a;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .alert-card:hover { border-color: #44ddff; }
+        .alert-card .pair { color: #44ddff; font-weight: bold; margin-bottom: 4px; }
+        .alert-card .detail { color: #88aacc; }
+        .risk-high { color: #ff4444; }
+        .risk-med  { color: #ff8844; }
+        .risk-low  { color: #ffcc44; }
+
+        .no-data { padding: 20px; text-align: center; color: #556677; font-size: 13px; }
+
+        .cesium-viewer-bottom { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<!-- HUD -->
+<div id="hud">
+    <h1>SATELLITE COLLISION MONITOR</h1>
+    <div class="stat-row">Satellites tracked: <span class="stat-value" id="statSats">--</span></div>
+    <div class="stat-row">Active alerts: <span class="stat-value" id="statAlerts">--</span></div>
+    <div class="stat-row">Close encounters: <span class="stat-value" id="statEncounters">--</span></div>
+    <div class="stat-row">Last update: <span class="stat-value" id="statTime">--</span></div>
+</div>
+
+<!-- Search -->
+<div id="searchContainer">
+    <input type="text" id="searchInput" placeholder="Search satellites (e.g. ISS, STARLINK)..." autocomplete="off">
+    <div id="searchResults"></div>
+</div>
+
+<!-- Info Panel -->
+<div id="infoPanel">
+    <button id="infoClose" onclick="closeInfo()">[x]</button>
+    <div class="info-name" id="infoName"></div>
+    <div class="info-row">NORAD ID: <span id="infoNorad"></span></div>
+    <div class="info-row">Altitude: <span id="infoAlt"></span></div>
+    <div class="info-row">Latitude: <span id="infoLat"></span></div>
+    <div class="info-row">Longitude: <span id="infoLon"></span></div>
+    <div class="info-row">Orbit period: <span id="infoPeriod"></span></div>
+    <div class="info-row">Last propagated: <span id="infoPropTime"></span></div>
+</div>
+
+<!-- Right Panel -->
+<div id="rightPanel">
+    <!-- Conjunction Alerts -->
+    <div class="panel-section">
+        <div class="panel-header alert-header" onclick="togglePanel('alerts')">
+            <div>
+                <h2 style="display:inline">CONJUNCTION ALERTS</h2>
+                <span class="badge alert-badge" id="alertBadge">0</span>
+            </div>
+            <span class="toggle" id="alertsToggle">▼</span>
+        </div>
+        <div class="panel-body" id="alertsBody">
+            <div class="no-data">No active alerts</div>
+        </div>
+    </div>
+
+    <!-- Close Encounters -->
+    <div class="panel-section">
+        <div class="panel-header encounter-header" onclick="togglePanel('encounters')">
+            <div>
+                <h2 style="display:inline">CLOSE ENCOUNTERS (&lt;20 km)</h2>
+                <span class="badge encounter-badge" id="encounterBadge">0</span>
+            </div>
+            <span class="toggle" id="encountersToggle">▼</span>
+        </div>
+        <div class="panel-body" id="encountersBody">
+            <div class="no-data">No close encounters</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// -------------------------------------------------------------------------
+// CesiumJS Setup
+// -------------------------------------------------------------------------
+
+Cesium.Ion.defaultAccessToken = 'YOUR_CESIUM_ION_TOKEN';
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayerPicker: false,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: false,
+    navigationHelpButton: false,
+    animation: false,
+    timeline: false,
+    fullscreenButton: false,
+    selectionIndicator: false,
+    infoBox: false,
+    scene3DOnly: true,
+});
+
+viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a1a');
+viewer.scene.globe.enableLighting = false;
+viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(0, 20, 25000000) });
+
+// -------------------------------------------------------------------------
+// Primitives & State
+// -------------------------------------------------------------------------
+const pointCollection = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+const satMap = {};
+const pointToNorad = new Map();
+const alertEntities = [];
+const encounterEntities = [];
+let orbitEntity = null;
+let selectedNorad = null;
+let latestEncounters = [];  // cached for re-rendering on toggle
+
+const DEFAULT_COLOR = Cesium.Color.fromCssColorString('#44ddff').withAlpha(0.8);
+const ALERT_COLOR = Cesium.Color.fromCssColorString('#ff4444');
+const ENCOUNTER_COLOR = Cesium.Color.fromCssColorString('#ffaa00');
+const SELECTED_COLOR = Cesium.Color.fromCssColorString('#00ff88');
+const ORBIT_COLOR = Cesium.Color.fromCssColorString('#00ff88').withAlpha(0.5);
+
+// Panel collapsed state
+const panelState = { alerts: false, encounters: false };
+
+// -------------------------------------------------------------------------
+// Panel Toggle
+// -------------------------------------------------------------------------
+function togglePanel(name) {
+    panelState[name] = !panelState[name];
+    const body = document.getElementById(name + 'Body');
+    const toggle = document.getElementById(name + 'Toggle');
+    if (panelState[name]) {
+        body.classList.add('collapsed');
+        toggle.classList.add('collapsed');
+    } else {
+        body.classList.remove('collapsed');
+        toggle.classList.remove('collapsed');
+    }
+
+    // Show/hide encounter visuals when toggling
+    if (name === 'encounters') {
+        clearEncounterVisuals();
+        if (!panelState.encounters) {
+            drawEncounterVisuals(latestEncounters);
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// Data Fetching
+// -------------------------------------------------------------------------
+async function fetchSatellites() {
+    try {
+        const resp = await fetch('/api/satellites');
+        const data = await resp.json();
+        updateSatellites(data.satellites);
+        document.getElementById('statSats').textContent = data.count.toLocaleString();
+        document.getElementById('statTime').textContent = new Date().toLocaleTimeString();
+    } catch (e) {
+        console.error('Failed to fetch satellites:', e);
+    }
+}
+
+async function fetchAlerts() {
+    try {
+        const resp = await fetch('/api/alerts');
+        const data = await resp.json();
+        updateAlerts(data.alerts);
+        document.getElementById('statAlerts').textContent = data.count;
+        document.getElementById('alertBadge').textContent = data.count;
+    } catch (e) {
+        console.error('Failed to fetch alerts:', e);
+    }
+}
+
+async function fetchEncounters() {
+    try {
+        const resp = await fetch('/api/encounters');
+        const data = await resp.json();
+        updateEncounters(data.encounters);
+        // Update counts after filtering (latestEncounters is post-filter)
+        document.getElementById('statEncounters').textContent = latestEncounters.length;
+        document.getElementById('encounterBadge').textContent = latestEncounters.length;
+    } catch (e) {
+        console.error('Failed to fetch encounters:', e);
+    }
+}
+
+async function fetchOrbit(noradId) {
+    try {
+        const resp = await fetch(`/api/orbit/${noradId}`);
+        const data = await resp.json();
+        if (data.error) return null;
+        return data;
+    } catch (e) {
+        console.error('Failed to fetch orbit:', e);
+        return null;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Satellite Rendering
+// -------------------------------------------------------------------------
+function updateSatellites(satellites) {
+    const seen = new Set();
+
+    for (const sat of satellites) {
+        seen.add(sat.norad_id);
+        const cartesian = Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.alt_km * 1000);
+
+        if (satMap[sat.norad_id]) {
+            satMap[sat.norad_id].point.position = cartesian;
+            satMap[sat.norad_id].lat = sat.lat;
+            satMap[sat.norad_id].lon = sat.lon;
+            satMap[sat.norad_id].alt = sat.alt_km;
+            satMap[sat.norad_id].name = sat.name;
+            satMap[sat.norad_id].propagated_at = sat.propagated_at;
+        } else {
+            const point = pointCollection.add({
+                position: cartesian,
+                pixelSize: 2.5,
+                color: DEFAULT_COLOR,
+                id: sat.norad_id,
+            });
+            satMap[sat.norad_id] = {
+                point, lat: sat.lat, lon: sat.lon, alt: sat.alt_km,
+                name: sat.name, norad_id: sat.norad_id,
+                propagated_at: sat.propagated_at,
+            };
+            pointToNorad.set(point, sat.norad_id);
+        }
+    }
+
+    for (const nid of Object.keys(satMap)) {
+        if (!seen.has(nid)) {
+            pointToNorad.delete(satMap[nid].point);
+            pointCollection.remove(satMap[nid].point);
+            delete satMap[nid];
+        }
+    }
+
+    if (selectedNorad && satMap[selectedNorad]) {
+        satMap[selectedNorad].point.color = SELECTED_COLOR;
+        satMap[selectedNorad].point.pixelSize = 8;
+        updateInfoPanel(selectedNorad);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Click & Hover
+// -------------------------------------------------------------------------
+const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+clickHandler.setInputAction(function (click) {
+    const picked = viewer.scene.pick(click.position);
+    if (Cesium.defined(picked) && picked.primitive instanceof Cesium.PointPrimitive) {
+        const noradId = pointToNorad.get(picked.primitive);
+        if (noradId) { selectSatellite(noradId); return; }
+    }
+    closeInfo();
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+let tooltipEntity = null;
+const hoverHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+hoverHandler.setInputAction(function (movement) {
+    if (tooltipEntity) { viewer.entities.remove(tooltipEntity); tooltipEntity = null; }
+    const picked = viewer.scene.pick(movement.endPosition);
+    if (Cesium.defined(picked) && picked.primitive instanceof Cesium.PointPrimitive) {
+        const noradId = pointToNorad.get(picked.primitive);
+        if (noradId && satMap[noradId]) {
+            const sat = satMap[noradId];
+            tooltipEntity = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.alt * 1000),
+                label: {
+                    text: sat.name,
+                    font: '13px Courier New',
+                    fillColor: Cesium.Color.WHITE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -12),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+            });
+            viewer.scene.canvas.style.cursor = 'pointer';
+        }
+    } else {
+        viewer.scene.canvas.style.cursor = 'default';
+    }
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+// -------------------------------------------------------------------------
+// Selection, Info Panel & Orbit
+// -------------------------------------------------------------------------
+async function selectSatellite(noradId) {
+    // Reset previous
+    if (selectedNorad && satMap[selectedNorad]) {
+        satMap[selectedNorad].point.color = DEFAULT_COLOR;
+        satMap[selectedNorad].point.pixelSize = 2.5;
+    }
+    clearOrbit();
+
+    selectedNorad = noradId;
+    const sat = satMap[noradId];
+    if (!sat) return;
+
+    sat.point.color = SELECTED_COLOR;
+    sat.point.pixelSize = 8;
+    updateInfoPanel(noradId);
+
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.alt * 1000 + 200000),
+        duration: 1.5,
+    });
+
+    // Fetch and draw orbit
+    const orbitData = await fetchOrbit(noradId);
+    if (orbitData && orbitData.points.length > 1 && selectedNorad === noradId) {
+        drawOrbit(orbitData);
+        document.getElementById('infoPeriod').textContent = orbitData.period_min.toFixed(1) + ' min';
+    }
+}
+
+function updateInfoPanel(noradId) {
+    const sat = satMap[noradId];
+    if (!sat) return;
+
+    document.getElementById('infoName').textContent = sat.name;
+    document.getElementById('infoNorad').textContent = noradId;
+    document.getElementById('infoAlt').textContent = sat.alt.toFixed(1) + ' km';
+    document.getElementById('infoLat').textContent = sat.lat.toFixed(4) + '\u00B0';
+    document.getElementById('infoLon').textContent = sat.lon.toFixed(4) + '\u00B0';
+    document.getElementById('infoPropTime').textContent = sat.propagated_at
+        ? new Date(sat.propagated_at).toLocaleTimeString() : '--';
+    document.getElementById('infoPanel').style.display = 'block';
+}
+
+function closeInfo() {
+    if (selectedNorad && satMap[selectedNorad]) {
+        satMap[selectedNorad].point.color = DEFAULT_COLOR;
+        satMap[selectedNorad].point.pixelSize = 2.5;
+    }
+    selectedNorad = null;
+    clearOrbit();
+    document.getElementById('infoPanel').style.display = 'none';
+    document.getElementById('infoPeriod').textContent = '--';
+}
+
+// -------------------------------------------------------------------------
+// Orbit Rendering
+// -------------------------------------------------------------------------
+function drawOrbit(orbitData) {
+    clearOrbit();
+
+    const positions = [];
+    for (const pt of orbitData.points) {
+        positions.push(Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, pt.alt_km * 1000));
+    }
+
+    orbitEntity = viewer.entities.add({
+        polyline: {
+            positions: positions,
+            width: 1.5,
+            material: new Cesium.PolylineGlowMaterialProperty({
+                glowPower: 0.15,
+                color: ORBIT_COLOR,
+            }),
+            arcType: Cesium.ArcType.NONE,
+        },
+    });
+}
+
+function clearOrbit() {
+    if (orbitEntity) {
+        viewer.entities.remove(orbitEntity);
+        orbitEntity = null;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Search
+// -------------------------------------------------------------------------
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+
+searchInput.addEventListener('input', function () {
+    const query = this.value.trim().toUpperCase();
+    if (query.length < 2) { searchResults.style.display = 'none'; return; }
+
+    const matches = [];
+    for (const nid of Object.keys(satMap)) {
+        const sat = satMap[nid];
+        if (sat.name.toUpperCase().includes(query) || nid.includes(query)) {
+            matches.push(sat);
+            if (matches.length >= 15) break;
+        }
+    }
+
+    if (matches.length === 0) {
+        searchResults.innerHTML = '<div class="search-item" style="color:#556677">No matches</div>';
+    } else {
+        searchResults.innerHTML = matches.map(sat =>
+            `<div class="search-item" onclick="searchSelect('${sat.norad_id}')">
+                <span class="sat-name">${sat.name}</span>
+                <span class="sat-id">#${sat.norad_id}</span>
+            </div>`
+        ).join('');
+    }
+    searchResults.style.display = 'block';
+});
+
+searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { searchResults.style.display = 'none'; searchInput.blur(); }
+    if (e.key === 'Enter') { const first = searchResults.querySelector('.search-item'); if (first) first.click(); }
+});
+
+document.addEventListener('click', function (e) {
+    if (!e.target.closest('#searchContainer')) searchResults.style.display = 'none';
+});
+
+function searchSelect(noradId) {
+    searchResults.style.display = 'none';
+    searchInput.value = satMap[noradId]?.name || '';
+    selectSatellite(noradId);
+}
+
+// -------------------------------------------------------------------------
+// Alert Rendering
+// -------------------------------------------------------------------------
+function updateAlerts(alerts) {
+    const body = document.getElementById('alertsBody');
+
+    // Clear old alert lines
+    for (const ent of alertEntities) viewer.entities.remove(ent);
+    alertEntities.length = 0;
+
+    if (!alerts || alerts.length === 0) {
+        body.innerHTML = '<div class="no-data">No active alerts</div>';
+        return;
+    }
+
+    alerts.sort((a, b) => (b.risk_log10 || -999) - (a.risk_log10 || -999));
+    body.innerHTML = alerts.map(a => buildAlertCard(a, true)).join('');
+
+    // Draw lines & highlight
+    for (const alert of alerts) {
+        highlightPair(alert.norad_a, alert.norad_b, ALERT_COLOR, alert.risk_log10);
+    }
+}
+
+function updateEncounters(encounters) {
+    const body = document.getElementById('encountersBody');
+
+    // Filter out near-zero relative speed (co-orbiting, same launch)
+    encounters = (encounters || []).filter(e =>
+        e.relative_speed != null && e.relative_speed > 500  // > 500 m/s (0.5 km/s)
+    );
+
+    latestEncounters = encounters;
+
+    if (encounters.length === 0) {
+        body.innerHTML = '<div class="no-data">No close encounters</div>';
+        clearEncounterVisuals();
+        return;
+    }
+
+    encounters.sort((a, b) => a.miss_distance_km - b.miss_distance_km);
+    body.innerHTML = encounters.map(e => buildAlertCard(e, false)).join('');
+
+    // Only draw visuals if panel is expanded
+    clearEncounterVisuals();
+    if (!panelState.encounters) {
+        drawEncounterVisuals(encounters);
+    }
+}
+
+function drawEncounterVisuals(encounters) {
+    for (const enc of encounters) {
+        const satA = satMap[enc.norad_a];
+        const satB = satMap[enc.norad_b];
+
+        if (satA && enc.norad_a !== selectedNorad) {
+            satA.point.color = ENCOUNTER_COLOR;
+            satA.point.pixelSize = 5;
+        }
+        if (satB && enc.norad_b !== selectedNorad) {
+            satB.point.color = ENCOUNTER_COLOR;
+            satB.point.pixelSize = 5;
+        }
+
+        if (satA && satB) {
+            const posA = Cesium.Cartesian3.fromDegrees(satA.lon, satA.lat, satA.alt * 1000);
+            const posB = Cesium.Cartesian3.fromDegrees(satB.lon, satB.lat, satB.alt * 1000);
+            const ent = viewer.entities.add({
+                polyline: {
+                    positions: [posA, posB],
+                    width: 2,
+                    material: ENCOUNTER_COLOR.withAlpha(0.5),
+                    arcType: Cesium.ArcType.NONE,
+                },
+            });
+            encounterEntities.push(ent);
+        }
+    }
+}
+
+function clearEncounterVisuals() {
+    for (const ent of encounterEntities) viewer.entities.remove(ent);
+    encounterEntities.length = 0;
+
+    // Reset encounter-highlighted points back to default
+    for (const nid of Object.keys(satMap)) {
+        if (nid !== selectedNorad && Cesium.Color.equals(satMap[nid].point.color, ENCOUNTER_COLOR)) {
+            satMap[nid].point.color = DEFAULT_COLOR;
+            satMap[nid].point.pixelSize = 2.5;
+        }
+    }
+}
+
+function buildAlertCard(event, showRisk) {
+    const distStr = event.miss_distance_km != null ? event.miss_distance_km.toFixed(1) : '?';
+    const speedStr = event.relative_speed != null ? (event.relative_speed / 1000).toFixed(1) : '?';
+
+    let riskHtml = '';
+    if (showRisk) {
+        const risk = event.risk_log10;
+        let riskClass = 'risk-low', riskLabel = 'LOW';
+        if (risk >= -4) { riskClass = 'risk-high'; riskLabel = 'HIGH'; }
+        else if (risk >= -6) { riskClass = 'risk-med'; riskLabel = 'MEDIUM'; }
+        const pc = event.collision_probability ? event.collision_probability.toExponential(2) : '--';
+        riskHtml = `<div class="detail">Pc: <span class="${riskClass}">${pc}</span> | Risk: <span class="${riskClass}">${riskLabel}</span></div>`;
+    }
+
+    return `
+        <div class="alert-card" onclick="flyToEncounter('${event.norad_a}', '${event.norad_b}')">
+            <div class="pair">${event.sat_a || '?'} -- ${event.sat_b || '?'}</div>
+            <div class="detail">Distance: ${distStr} km | Speed: ${speedStr} km/s</div>
+            ${riskHtml}
+        </div>
+    `;
+}
+
+function highlightPair(noradA, noradB, color, riskLog10) {
+    const satA = satMap[noradA];
+    const satB = satMap[noradB];
+
+    if (satA && noradA !== selectedNorad) {
+        satA.point.color = color;
+        satA.point.pixelSize = 5;
+    }
+    if (satB && noradB !== selectedNorad) {
+        satB.point.color = color;
+        satB.point.pixelSize = 5;
+    }
+
+    if (satA && satB) {
+        const posA = Cesium.Cartesian3.fromDegrees(satA.lon, satA.lat, satA.alt * 1000);
+        const posB = Cesium.Cartesian3.fromDegrees(satB.lon, satB.lat, satB.alt * 1000);
+
+        let lineColor = color.withAlpha(0.5);
+        if (riskLog10 !== null) {
+            lineColor = riskLog10 >= -4
+                ? Cesium.Color.RED.withAlpha(0.8)
+                : riskLog10 >= -6
+                    ? Cesium.Color.ORANGE.withAlpha(0.6)
+                    : Cesium.Color.YELLOW.withAlpha(0.4);
+        }
+
+        const ent = viewer.entities.add({
+            polyline: {
+                positions: [posA, posB],
+                width: 2,
+                material: lineColor,
+                arcType: Cesium.ArcType.NONE,
+            },
+        });
+        alertEntities.push(ent);
+    }
+}
+
+function flyToEncounter(noradA, noradB) {
+    selectSatellite(noradA);
+}
+
+// -------------------------------------------------------------------------
+// Refresh Loop
+// -------------------------------------------------------------------------
+fetchSatellites();
+fetchAlerts();
+fetchEncounters();
+
+setInterval(fetchSatellites, 5000);
+setInterval(fetchAlerts, 10000);
+setInterval(fetchEncounters, 10000);
+</script>
+
+</body>
+</html>
