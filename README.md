@@ -1,5 +1,7 @@
 # Satellite Collision Monitor
 
+![Dashboard Screenshot](screenshots/dashboard.png)
+
 Real-time satellite conjunction detection and collision risk assessment pipeline. Tracks ~15,000 active satellites, identifies close approaches using k-d tree spatial indexing, scores collision probability with a gradient-boosted model trained on real ESA conjunction data, and visualizes everything on an interactive 3D globe.
 
 ![Dashboard](https://img.shields.io/badge/dashboard-CesiumJS-44ddff) ![Pipeline](https://img.shields.io/badge/pipeline-Kafka%20%2B%20Redis-00ff88) ![ML](https://img.shields.io/badge/model-scikit--learn-ff8844)
