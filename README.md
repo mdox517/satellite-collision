@@ -44,7 +44,7 @@ The research and model development is documented in three Jupyter notebooks:
 
 ```bash
 # Clone and create virtual environment
-git clone https://github.com/<your-username>/satellite-collision.git
+git clone https://github.com/mdox517/satellite-collision.git
 cd satellite-collision
 python3 -m venv venv
 source venv/bin/activate
